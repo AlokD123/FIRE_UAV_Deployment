@@ -1,4 +1,4 @@
-#include <include/lidar_lite.h>
+#include "lidar_lite.h"
 #define SLEEP_TIME		100
 //Mode definition
 #define DEFAULT_ACQ_MODE 	0x08 //Default: Only disabled quick termination
@@ -9,6 +9,8 @@
 #define OR_ALT_REF_CNT 		0x04 //OR-mask to choose alternate number of acquisitions per measurement
 
 #define SINGLE_ACQ		0x01
+
+#define DEBUG
 
 using namespace std;
 
@@ -21,7 +23,9 @@ Lidar_Lite::Lidar_Lite (int bus){
 }
 
 Lidar_Lite::~Lidar_Lite(void){
-  printf("Ending Lidar-Lite Session\n");
+  #ifdef DEBUG
+      printf("Ending Lidar-Lite Session\n");
+  #endif
   if (i2c_bus > 0){
    int e = close(i2c_bus);
   }
@@ -32,16 +36,22 @@ Lidar_Lite::~Lidar_Lite(void){
 /*Connect and Configure Lidar*/
 
 int Lidar_Lite::connect( void ) {
-  //printf("Connecting to %s", filename);
+  #ifdef DEBUG
+      printf("Connecting to %s", filename);
+  #endif
   i2c_bus = open(filename, O_RDWR);
   if (i2c_bus < 0){
     err = errno;
-    fprintf(stderr,"Connect Error: %d", err);
+    #ifdef DEBUG
+        fprintf(stderr,"Connect Error: %d", err);
+    #endif
     return -1;
   }
   if (ioctl(i2c_bus, I2C_SLAVE, 0x62) < 0) {
     err = errno;
-    printf("Bus Error: %d", err);
+    #ifdef DEBUG
+       printf("Bus Error: %d", err);
+    #endif
     return -1;
   }
 
@@ -108,7 +118,9 @@ int Lidar_Lite::readAndWait(int readRegister){
   //usleep(SLEEP_TIME);
   if (res < 0){
     err = errno;
-    printf("Read Error: %d", err);
+    #ifdef DEBUG
+       printf("Read Error: %d", err);
+    #endif
     return -1;
   } else {
     return 0;
