@@ -7,6 +7,8 @@
 #include <pigpio.h>
 #include <wiringPi.h>
 #include <wiringSerial.h>
+#include <Python.h>
+//#include "/home/pi/Desktop/git/cpython/Include/Python.h"
 //#include "/usr/include/linux/i2c.h"
 
 
@@ -20,6 +22,10 @@
 
 #define MIN_POS			0					//Minimum position of orientation
 #define MAX_POS			10					//Maximum position of orientation
+
+/*Other Sensor Constants*/
+#define GAS_THRESHOLD_PRCNT		20			//% value above which gas (smoke) defined to be detected
+#define ULTRA_MAX_DIST			500			//Experimentally determined max reliable distance for the ultrasonic sensor (cm)
 
 /*Macros*/
 //Convert servo position to scaled duty cycle
@@ -49,38 +55,27 @@
 
 
 /*Functionalities*/
-#define REPLACE_CENTER						//Replace data point in center with ultrasonic when ultra_dist < ____ cm AND 
-#ifdef REPLACE_CENTER
-	#define USE_ULTRA_BEST_GUESS			//When big discrepancy, use value of ultrasonic sensor to determine whether too close rather than the LIDAR (i.e. when too smokey and all reflecting)
-#endif
-#define REMOVE_MAG_OFFSET					//Subtract off the offset due to the magnetometer
+#define WEIGHTED_REPLACE_CENTER				//Replace data point in center with weighted sum of ultrasonic and LIDAR (depending on smoke density) when ultra_dist < ULTRA_MAX_DIST && at half-way angle
+#define USE_ULTRA_BEST_GUESS			//When big discrepancy between ultrasonic and LIDAR, use value of ultrasonic sensor to determine whether too close rather than the LIDAR (i.e. when too smokey and all reflecting)
+#define ADD_MAG_OFFSET						//Add offset in UAV orientation, as measured by the magnetometer  //****TO DECIDE!!
 #define TOGGLE_LED							//Toggle LED ON when object too close, and OFF when not
 
 #define W_LIDAR								//If LIDAR connected...
-/*
-#ifdef W_LIDAR
-	#define LIDAR_WHILE_COND ()
-#else
-	#define LIDAR_WHILE_COND 1
-#endif
-*/
-#define W_ULTRA_AND_GAS							//If ultrasonic and gas sensors connected...
-/*
-#ifdef W_ULTRA_AND_GAS
-	#define ULTRA_WHILE_COND _____ //<------- Condition to stop if 
-#else
-	#define LIDAR_WHILE_COND 1
-#endif
-*/
+#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
 #define DATA_SEPARATION 					//General separator to allow for parsing <---- Gas sensor data goes here
+#ifdef DATA_SEPARATION
+	//By default, send binary value for whether gas (smoke) is detected (-2) or not (-1).
+	//#define RAW_GAS_DENSITY				//Otherwise, send raw gas sensor data
+#endif
 
 
 /* Variables */
 int pos=0;				//Position of servo (angle in degrees 0->180)
 int lidar_dist=0;		//Lidar measured range (in cm)
 int ultra_dist=0;		//Ultrasonic measured range (in cm)
-int dist=0;			//Best estimate range of objects in front, accounting for smoke (combination of LIDAR and ultrasonic) (in cm)
+int dist=0;				//Best estimate range of objects in front, accounting for smoke (combination of LIDAR and ultrasonic) (in cm)
 int gas_density=0;		//Estimate of gas density (%)
+bool obst_det=0;		//Estimate of whether obstacle detected (1) or not (0)
 bool turnCW=1;			//Holds direction of rotation (1=CW, 0=CCW)
 uint32_t startTime, endTime, processTime; //For timing process
 
@@ -141,8 +136,37 @@ void intializeGPIO(){
 }
 
 //Sensor fusion algorithm
-int fuseData(int lidar_dist,int ultra_dist){
-	
+int fuseData(int lidar_dist,int ultra_dist,int gas_density,int pos){
+	//At half-way angle...
+	//Send fused sensor data
+	/*
+	a) for ultra_dist<ULTRA_MAX_DIST, replace center pt of sweep with...
+		-> #ifdef USE_ULTRA_BEST_GUESS: ultrasonic value (when heavy smoke present)	--> reason: to account for large discrepancy
+		-> LIDAR (smoke not present)												--> reason: ultrasonic is more variable
+		-> #ifdef WEIGHTED_REPLACE_CENTER: weighted average (when some smoke present) --> reason: LIDAR is affected by smoke
+	b) for ultra_dist>ULTRA_MAX_DIST, all Lidar (NO CHANGE)
+	*/
+}
+
+void getUltraNGasData(){
+	FILE* file;
+    int argc;
+    char * argv[3];
+
+    argc = 3;
+    argv[0] = "mypy.py";
+    argv[1] = "-m";
+    argv[2] = "/tmp/targets.list";
+
+    Py_SetProgramName(argv[0]);
+    Py_Initialize();
+    PySys_SetArgv(argc, argv);
+    file = fopen("mypy.py","r");
+    //PyRun_SimpleFile(file, "mypy.py");
+	Py
+    Py_Finalize();
+
+    return;
 }
 
 
@@ -175,6 +199,9 @@ int main(){
 	
 	//Continuously get distance measurement and sweep Lidar
 	while(EXIT_COND){
+		//#ifdef ADD_MAG_OFFSET: add UAV orientation (pos) offset as detected by the magnetometer
+		
+		
 		//Move motor... if LIDAR present
 		#ifdef W_LIDAR
 			gpioHardwarePWM(SERVO_PIN,FREQUENCY,SCALED_DUTY_CYCLE(pos));
@@ -189,6 +216,7 @@ int main(){
 		#endif
 		//Get ultrasonic distance (polling)
 		#ifdef W_ULTRA_AND_GAS
+				gas_density= -3;
 				ultra_dist = -1;					//<--------- GET measurements from gas and ultrasonic here
 		#endif
 		
@@ -198,11 +226,11 @@ int main(){
 			}
 			//Sensor fusion if BOTH present
 			#ifdef W_LIDAR
-				dist=fuseData(lidar_dist,ultra_dist);
+				dist=fuseData(lidar_dist,ultra_dist,gas_density,pos);
 			#endif
 		#endif
 		
-		
+		//Print data to serial port for transmission (system) or plotting (individual)
 		#ifdef DEBUG
 			printf("Range: %d cm	DC: %d\n", dist,gpioGetPWMdutycycle(SERVO_PIN));
 		#endif
@@ -214,33 +242,32 @@ int main(){
 		gpioDelay(DEAD_TIME*10);
 
 		//Change direction upon reaching end
-		//Also send gas sensor data
-		if(pos==MAX_POS){
-			turnCW=0;
+		//Also send gas sensor data (BINARY value)
+		if(pos==MAX_POS) turnCW=0;
+		if(pos==MIN_POS) turnCW=1;
+		if((pos==MIN_POS) || (pos==MAX_POS)){
 			#ifdef DATA_SEPARATION
 				#ifdef DEBUG
 					printf("-1\n");	
 				#endif
 				#ifdef W_ULTRA_AND_GAS
-					serialPrintf(SERIAL_ID,"gas\n");		//<---------- Replace with gas data
+					#ifdef RAW_GAS_DENSITY
+						serialPrintf(SERIAL_ID,gas_density+"\n");		//Option raw value (not default)
+					#else
+						if(gas_density <= GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-1\n");	//Provide binary value indicator of smoke
+						else if(gas_density > GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-2\n");
+					#endif
 				#else
-					serialPrintf(SERIAL_ID,"-3\n");		//<-------------- Send data separator -3 (max position)
+					serialPrintf(SERIAL_ID,"-3\n");		//<-------------- Send data separator -3 (end position)
 				#endif
 			#endif
 		}
-		else if(pos==MIN_POS){
-			turnCW=1;
-			#ifdef DATA_SEPARATION
-				#ifdef DEBUG
-					printf("-1\n");	
-				#endif
-				#ifdef W_ULTRA_AND_GAS
-					serialPrintf(SERIAL_ID,"gas\n");		//<---------- Replace with gas data
-				#else
-					serialPrintf(SERIAL_ID,"-4\n");		//<-------------- Send data separator -4 (min position)
-				#endif
-			#endif
-		}
+		
+		//Determine if object too close, based on threshold range. Stored in boolean. Will be later used to direct UAV.
+		
+		//#ifdef TOGGLE_LED: toggle LED if too close
+		
+		
 		//Update next position
 		if(turnCW==0) pos--;
 		else pos++;
