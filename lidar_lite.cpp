@@ -22,7 +22,7 @@ Lidar_Lite::Lidar_Lite (int bus){
   snprintf(filename, 19, "/dev/i2c-%d", adapter_num);
 }
 
-/*Lidar_Lite::~Lidar_Lite(void){
+Lidar_Lite::~Lidar_Lite(void){
   printf("Error: %d\n",err);
   #ifdef DEBUG
       printf("Ending Lidar-Lite Session\n");
@@ -30,7 +30,7 @@ Lidar_Lite::Lidar_Lite (int bus){
   if (i2c_bus > 0){
    int e = close(i2c_bus);
   }
-}*/
+}
 
 
 
