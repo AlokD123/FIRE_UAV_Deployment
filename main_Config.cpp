@@ -8,8 +8,13 @@
 #include <wiringPi.h>
 #include <wiringSerial.h>
 #include <Python.h>
+#include <stdlib.h>
 //#include "/home/pi/Desktop/git/cpython/Include/Python.h"
 //#include "/usr/include/linux/i2c.h"
+
+/*Python script*/
+//#define PYTHON_SCRIPT_NAME	"GetData_Ultra+Gas"	//NOT A DEFINITION. This must be changed manually.
+//#define PYTHON_SCRIPT_PATH	'/home/pi/Desktop'	//NOT A DEFINITION. This must be changed manually.
 
 
 /*Servo Constants*/
@@ -36,22 +41,24 @@
 
 /*Pin definitions*/
 #define SERVO_PIN	18
-#define ULTRA_PIN	SERVO_PIN
 
 
 /*Errors*/
 #define GPIO_NO_INITIALIZE	-1
 #define LIDAR_NO_INITIALIZE	-2
 #define LIDAR_ERROR			-3
-#define OTHER_ERROR			-4 //See errno
+#define NO_PYTHON_SCRIPT	-4
+#define PYTHON_SCRIPT_ERR	-5
+#define OTHER_ERROR			-6 //See errno
 
 /*States*/
-//#define DEBUG
-//#define QUIT
+#define DEBUG
+//#define QUIT							//<---- Keep this (usually) commented!
 #define EXIT_COND1	1						//Continuous run
 #define EXIT_COND2	k<2550					//Alternate exit condition: finite time
 #define EXIT_COND	EXIT_COND1
 //#define PROCESS_TIMING
+#define STDOUT_SEPARATOR
 
 
 /*Functionalities*/
@@ -61,7 +68,7 @@
 #define TOGGLE_LED							//Toggle LED ON when object too close, and OFF when not
 
 #define W_LIDAR								//If LIDAR connected...
-#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
+//#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
 #define DATA_SEPARATION 					//General separator to allow for parsing <---- Gas sensor data goes here
 #ifdef DATA_SEPARATION
 	//By default, send binary value for whether gas (smoke) is detected (-2) or not (-1).
@@ -72,9 +79,9 @@
 /* Variables */
 int pos=0;				//Position of servo (angle in degrees 0->180)
 int lidar_dist=0;		//Lidar measured range (in cm)
-int ultra_dist=0;		//Ultrasonic measured range (in cm)
+int ultra_dist=-1;		//Ultrasonic measured range (in cm)
 int dist=0;				//Best estimate range of objects in front, accounting for smoke (combination of LIDAR and ultrasonic) (in cm)
-int gas_density=0;		//Estimate of gas density (%)
+int gas_density=-2;		//Estimate of gas density (%)
 bool obst_det=0;		//Estimate of whether obstacle detected (1) or not (0)
 bool turnCW=1;			//Holds direction of rotation (1=CW, 0=CCW)
 uint32_t startTime, endTime, processTime; //For timing process
@@ -85,50 +92,52 @@ bool GPIO_STARTED=0;
 bool LIDAR_STARTED=0;
 
 //Routine to quit, closing comm channels
-int quit(int error){
+void quit(int error){
 	if(GPIO_STARTED){
 		gpioWrite(SERVO_PIN,0);
 		gpioTerminate();
 	}
 	if(LIDAR_STARTED){
 		LIDAR1.~Lidar_Lite();
-		//LIDAR1=NULL;
 	}
 	if(SERIAL_ID!=0){
 		serialClose(SERIAL_ID);
 	}
 	#ifdef DEBUG
-		printf("\n\n");
+		printf("Error Code = %d. Quitting\n\n",error);
 	#endif
-	return error;
+	exit(error);
 }
 
 //Initialization of comm channels
 void initializeSerial(){
-	if( (SERIAL_ID=serialOpen("ttyAMA0",115200))<0 ){
+	if( (SERIAL_ID=serialOpen("/dev/ttyAMA0",115200))<0 ){
 		#ifdef DEBUG
-			printf("Unable to open serial port, %s", strerror(errno));
+			printf("Unable to open serial port. %s", strerror(errno));
 		#endif
 		quit(OTHER_ERROR);
 	}
 }
-int connectLidar(Lidar_Lite lidar){
-	int x=lidar.connect();
+int connectLidar(){
+	int x=LIDAR1.connect();
 	LIDAR_STARTED=0;
 	if (x< 0){		//If error connect, exit
 		#ifdef DEBUG
-			printf("Error connecting: %d\n", lidar.err);
+			printf("Error connecting: %d\n", LIDAR1.getError());
 			quit(LIDAR_NO_INITIALIZE);
 		#endif
 	}else{
 		LIDAR_STARTED=1;
+		#ifdef DEBUG
+			printf("Connected to Lidar\n");
+		#endif
 	}
 	return x; //Continue w/ or w/o LIDAR
 }
 void intializeGPIO(){
 	if( gpioInitialise()<0 ){
 		#ifdef DEBUG
-			fprintf(stderr,"pigpio failed\n");
+			printf("pigpio failed to initialize.\n");
 		#endif
 		quit(GPIO_NO_INITIALIZE);
 	}
@@ -149,23 +158,65 @@ int fuseData(int lidar_dist,int ultra_dist,int gas_density,int pos){
 }
 
 void getUltraNGasData(){
-	FILE* file;
-    int argc;
-    char * argv[3];
+	#ifdef DEBUG
+		printf("Running Python script to get ultrasonic and gas sensor measurements.\n");
+	#endif
+	// Initialize the Python interpreter.
+	Py_Initialize();
+	// Create some Python objects that will later be assigned values.
+	PyObject *pName, *pModule, *pDict, *pFunc, *pArgs, *pValue;
+	// Set Python path
+	PyRun_SimpleString("import sys");
+	PyRun_SimpleString("sys.path.append('/home/pi/Desktop')");
 
-    argc = 3;
-    argv[0] = "mypy.py";
-    argv[1] = "-m";
-    argv[2] = "/tmp/targets.list";
+	// Convert the file name to a Python string.
+	pName = PyString_FromString("GetData_Ultra+Gas");
+	// Import the file as a Python module.
+	pModule = PyImport_Import(pName);
+	if(pModule == NULL){
+		#ifdef DEBUG
+			printf("No Python Script!\n");
+		#endif
+		quit(NO_PYTHON_SCRIPT);
+	}
+	// Create a dictionary for the contents of the module.
+	pDict = PyModule_GetDict(pModule);
+	// Get the add method from the dictionary.
+	pFunc = PyDict_GetItemString(pDict, "main");
+	
 
-    Py_SetProgramName(argv[0]);
-    Py_Initialize();
-    PySys_SetArgv(argc, argv);
-    file = fopen("mypy.py","r");
-    //PyRun_SimpleFile(file, "mypy.py");
-	Py
-    Py_Finalize();
+	// Call the function with the arguments.
+	PyObject* pResult = PyObject_CallObject(pFunc, NULL);
+	// Print a message if calling the method failed.
+	if(pResult == NULL)   printf("Method failed.\n");
 
+	//Parse values
+	PyObject* tupleItem1 = PyTuple_GetItem(pResult,0);
+	if(tupleItem1 == NULL){
+		#ifdef DEBUG
+			printf("No ultrasonic distance return value from Python script.\n");
+		#endif
+		quit(PYTHON_SCRIPT_ERR);
+	}else{
+		ultra_dist=(int) PyInt_AsLong(tupleItem1);
+	}
+	PyObject* tupleItem2 = PyTuple_GetItem(pResult,1);
+	if(tupleItem2 == NULL){
+		#ifdef DEBUG
+			printf("No gas sensor measurement return value from Python script.\n");
+		#endif
+		quit(PYTHON_SCRIPT_ERR);
+	}else{
+		gas_density=(int) PyInt_AsLong(tupleItem2);
+	}
+
+	// Destroy the Python interpreter.
+	Py_DECREF(pModule);
+	Py_DECREF(pName);
+	Py_Finalize();
+	#ifdef DEBUG
+		printf("Ultra_dist = %d, Gas_density = %d\n",ultra_dist,gas_density);
+	#endif
     return;
 }
 
@@ -173,19 +224,21 @@ void getUltraNGasData(){
 
 int main(){
 	#ifdef QUIT
-		printf("Preemptive quit\n");
+		printf("Quit right away\n");
 		quit(0);
 	#endif	
 
 
 	//Start serial
 		initializeSerial();
+
+	#ifdef W_LIDAR
 	//Initalize Lidar-Lite
-		int lidar_connection= connectLidar(LIDAR1);
+		int lidar_connection= connectLidar();		//Currently only set up for one Lidar module (LIDAR1)
 		if(lidar_connection<0){				//Else continue w/o
 			printf("No lidar, error: %d",lidar_connection);
 		};
-		
+	#endif		
 
 	#ifdef PROCESS_TIMING
 		startTime=gpioTick();
@@ -209,15 +262,20 @@ int main(){
 
 		//Get LIDAR distance (polling) if no errors
 		#ifdef W_LIDAR
-			if(LIDAR1.err >= 0){
+			if(LIDAR1.getError() == 0){
 				lidar_dist = LIDAR1.getDistance();
 				dist=lidar_dist;					//Use LIDAR range by default
+				#ifdef DEBUG
+					//printf("LIDAR distance: %d\n",lidar_dist);
+				#endif
+			}else{
+				quit(LIDAR_ERROR);
 			}
 		#endif
+
 		//Get ultrasonic distance (polling)
 		#ifdef W_ULTRA_AND_GAS
-				gas_density= -3;
-				ultra_dist = -1;					//<--------- GET measurements from gas and ultrasonic here
+			getUltraNGasData();	//Get measurements from gas and ultrasonic by calling Python script
 		#endif
 		
 		#ifdef W_ULTRA_AND_GAS
@@ -232,11 +290,11 @@ int main(){
 		
 		//Print data to serial port for transmission (system) or plotting (individual)
 		#ifdef DEBUG
-			printf("Range: %d cm	DC: %d\n", dist,gpioGetPWMdutycycle(SERVO_PIN));
+			#ifdef W_LIDAR
+				printf("Range: %d cm	Motor Duty Cycle: %d\n", dist,gpioGetPWMdutycycle(SERVO_PIN));
+			#endif
 		#endif
 		serialPrintf(SERIAL_ID,dist+"\n");
-		printf("%d,%d\n", dist,gpioGetPWMdutycycle(SERVO_PIN));  // <---------- Must remove
-
 
 		//Delay to allow motor to finish turning (us)
 		gpioDelay(DEAD_TIME*10);
@@ -247,7 +305,7 @@ int main(){
 		if(pos==MIN_POS) turnCW=1;
 		if((pos==MIN_POS) || (pos==MAX_POS)){
 			#ifdef DATA_SEPARATION
-				#ifdef DEBUG
+				#ifdef STDOUT_SEPARATOR
 					printf("-1\n");	
 				#endif
 				#ifdef W_ULTRA_AND_GAS
@@ -258,7 +316,7 @@ int main(){
 						else if(gas_density > GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-2\n");
 					#endif
 				#else
-					serialPrintf(SERIAL_ID,"-3\n");		//<-------------- Send data separator -3 (end position)
+					serialPrintf(SERIAL_ID,"-3\n");					// Send data separator -3 (end position)
 				#endif
 			#endif
 		}
@@ -280,5 +338,5 @@ int main(){
 	#endif
 
 	gpioTerminate();
-	quit(LIDAR_ERROR);
+	quit(OTHER_ERROR);
 }

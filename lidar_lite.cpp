@@ -22,14 +22,15 @@ Lidar_Lite::Lidar_Lite (int bus){
   snprintf(filename, 19, "/dev/i2c-%d", adapter_num);
 }
 
-Lidar_Lite::~Lidar_Lite(void){
+/*Lidar_Lite::~Lidar_Lite(void){
+  printf("Error: %d\n",err);
   #ifdef DEBUG
       printf("Ending Lidar-Lite Session\n");
   #endif
   if (i2c_bus > 0){
    int e = close(i2c_bus);
   }
-}
+}*/
 
 
 
@@ -37,13 +38,13 @@ Lidar_Lite::~Lidar_Lite(void){
 
 int Lidar_Lite::connect( void ) {
   #ifdef DEBUG
-      printf("Connecting to %s", filename);
+      printf("Connecting to %s\n", filename);
   #endif
   i2c_bus = open(filename, O_RDWR);
   if (i2c_bus < 0){
     err = errno;
     #ifdef DEBUG
-        fprintf(stderr,"Connect Error: %d", err);
+        printf("Connect Error: %d\n", err);
     #endif
     return -1;
   }
@@ -58,6 +59,7 @@ int Lidar_Lite::connect( void ) {
   //Additional configurations for LIDAR
   int e;
   //Delay between measurements=0.01s (default max 100Hz)
+
   e = writeAndWait(0x45,0x14);
   if (e < 0){
     return e;
@@ -87,12 +89,17 @@ int Lidar_Lite::connect( void ) {
 
 
 //Not helping...
+  //First reset to factory settings
+  //e = writeAndWait(0x00,0x00);
+  //if (e < 0){
+  //  return e;
+  //}
+
   //Disable measurement filter too
   //e = writeAndWait(0x04,DEFAULT_ACQ_MODE|OR_DISABLE_CALLER|OR_DISABLE_FILTER);
   //if (e < 0){
   //  return e;
   //}
-  
 
   return 0;
 }
@@ -106,7 +113,7 @@ int Lidar_Lite::writeAndWait(int writeRegister, int value){
   //usleep(SLEEP_TIME);
   if (res < 0){
     err = errno;
-    printf("Write Error %d", err);
+    printf("Write Error. Errno=%d\n", err);
     return -1;
   } else {
     return 0;
@@ -119,7 +126,7 @@ int Lidar_Lite::readAndWait(int readRegister){
   if (res < 0){
     err = errno;
     #ifdef DEBUG
-       printf("Read Error: %d", err);
+       printf("Read Error. Errno=%d\n", err);
     #endif
     return -1;
   } else {
@@ -137,10 +144,11 @@ int Lidar_Lite::getDistance( void ){
   	//}
   	//else{
   	//  i++;
-  	//  e = writeAndWait(0x00,0x03); //Set no receiver bias correction
+  	  //e = writeAndWait(0x00,0x03); //Set no receiver bias correction
   	//}
   if (e < 0){
-      return e;
+      	printf("Problem here\n");
+	return e;
   }  
 
   e = readAndWait(0x8f); //Get data HIGH byte

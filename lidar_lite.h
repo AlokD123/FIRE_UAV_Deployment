@@ -24,7 +24,7 @@ class Lidar_Lite{
   public:
     int err;
     Lidar_Lite(int);
-    ~Lidar_Lite(void);
+    //~Lidar_Lite(void);
     int connect(void);
     int writeAndWait(int, int);
     int readAndWait(int);
