@@ -15,7 +15,7 @@
 /*Python script*/
 //#define PYTHON_SCRIPT_NAME	"GetData_Ultra+Gas"	//NOT A DEFINITION. This must be changed manually.
 //#define PYTHON_SCRIPT_PATH	'/home/pi/Desktop'	//NOT A DEFINITION. This must be changed manually.
-
+#define Py_DEBUG
 
 /*Servo Constants*/
 //#define DEAD_TIME_SWEEP_PROD	500*180					//As sweep angle decreases, dead time should increase??
@@ -52,12 +52,12 @@
 #define OTHER_ERROR			-6 //See errno
 
 /*States*/
-#define DEBUG
+//#define DEBUG
 //#define QUIT							//<---- Keep this (usually) commented!
 #define EXIT_COND1	1						//Continuous run
 #define EXIT_COND2	k<2550					//Alternate exit condition: finite time
 #define EXIT_COND	EXIT_COND1
-//#define PROCESS_TIMING
+#define PROCESS_TIMING
 #define STDOUT_SEPARATOR
 
 
@@ -67,8 +67,8 @@
 #define ADD_MAG_OFFSET						//Add offset in UAV orientation, as measured by the magnetometer  //****TO DECIDE!!
 #define TOGGLE_LED							//Toggle LED ON when object too close, and OFF when not
 
-#define W_LIDAR								//If LIDAR connected...
-//#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
+//#define W_LIDAR								//If LIDAR connected...
+#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
 #define DATA_SEPARATION 					//General separator to allow for parsing <---- Gas sensor data goes here
 #ifdef DATA_SEPARATION
 	//By default, send binary value for whether gas (smoke) is detected (-2) or not (-1).
@@ -90,6 +90,7 @@ Lidar_Lite LIDAR1=Lidar_Lite(1);
 int SERIAL_ID=0;
 bool GPIO_STARTED=0;
 bool LIDAR_STARTED=0;
+bool PYTHON_STARTED=0;
 
 //Routine to quit, closing comm channels
 void quit(int error){
@@ -161,63 +162,116 @@ void getUltraNGasData(){
 	#ifdef DEBUG
 		printf("Running Python script to get ultrasonic and gas sensor measurements.\n");
 	#endif
+
+	printf("Before initialize\n");
 	// Initialize the Python interpreter.
 	Py_Initialize();
+	if(PYTHON_STARTED==0){
+		PYTHON_STARTED=1;
+	}
+	printf("After initialize\n");
+
 	// Create some Python objects that will later be assigned values.
-	PyObject *pName, *pModule, *pDict, *pFunc, *pArgs, *pValue;
+	PyObject *pName, *pModule, *pDict, *pFunc;
 	// Set Python path
+
 	PyRun_SimpleString("import sys");
 	PyRun_SimpleString("sys.path.append('/home/pi/Desktop')");
+	printf("After add path\n");
 
 	// Convert the file name to a Python string.
 	pName = PyString_FromString("GetData_Ultra+Gas");
-	// Import the file as a Python module.
-	pModule = PyImport_Import(pName);
-	if(pModule == NULL){
+	if(pName == NULL){
 		#ifdef DEBUG
-			printf("No Python Script!\n");
+			printf("Mispelled script name?\n");
 		#endif
 		quit(NO_PYTHON_SCRIPT);
 	}
+
+	// Import the file as a Python module.
+	printf("Before import module\n");
+	pModule = PyImport_Import(pName);
+	printf("After import module\n");
+	if(pModule == NULL){
+		//#ifdef DEBUG
+			printf("No Python Script!\n");
+		//#endif
+		quit(NO_PYTHON_SCRIPT);
+	}
+
 	// Create a dictionary for the contents of the module.
 	pDict = PyModule_GetDict(pModule);
 	// Get the add method from the dictionary.
+	printf("Before get func\n");
 	pFunc = PyDict_GetItemString(pDict, "main");
+	printf("After get func\n");
 	
+	Py_INCREF(pName);
+	Py_INCREF(pModule);
+	Py_INCREF(pDict);
+	Py_INCREF(pFunc);
 
+	#ifdef PROCESS_TIMING
+			endTime=gpioTick();
+			processTime=endTime-startTime;
+			printf("Process time before calling script: %zu (us)\n\n",processTime);
+	#endif
+	
+	printf("Before call script\n");	
 	// Call the function with the arguments.
 	PyObject* pResult = PyObject_CallObject(pFunc, NULL);
 	// Print a message if calling the method failed.
 	if(pResult == NULL)   printf("Method failed.\n");
+	printf("After call script\n");	
 
+
+	#ifdef PROCESS_TIMING
+			endTime=gpioTick();
+			processTime=endTime-startTime;
+			printf("Process time after calling script: %zu (us)\n\n",processTime);
+	#endif
+
+	printf("Before get items\n");	
 	//Parse values
 	PyObject* tupleItem1 = PyTuple_GetItem(pResult,0);
 	if(tupleItem1 == NULL){
-		#ifdef DEBUG
+		//#ifdef DEBUG
 			printf("No ultrasonic distance return value from Python script.\n");
-		#endif
+		//#endif
 		quit(PYTHON_SCRIPT_ERR);
 	}else{
 		ultra_dist=(int) PyInt_AsLong(tupleItem1);
 	}
 	PyObject* tupleItem2 = PyTuple_GetItem(pResult,1);
 	if(tupleItem2 == NULL){
-		#ifdef DEBUG
+		//#ifdef DEBUG
 			printf("No gas sensor measurement return value from Python script.\n");
-		#endif
+		//#endif
 		quit(PYTHON_SCRIPT_ERR);
 	}else{
 		gas_density=(int) PyInt_AsLong(tupleItem2);
 	}
+	printf("After get items\n");
+
 
 	// Destroy the Python interpreter.
-	Py_DECREF(pModule);
-	Py_DECREF(pName);
+	Py_CLEAR(pModule);
+	Py_CLEAR(pName);
+	Py_CLEAR(pDict);
+	Py_CLEAR(pFunc);
+	Py_CLEAR(pResult);
+	Py_CLEAR(tupleItem1);
+	Py_CLEAR(tupleItem2);
+
+	printf("Before finalize\n");
 	Py_Finalize();
+	printf("After finalize\n");
+
 	#ifdef DEBUG
 		printf("Ultra_dist = %d, Gas_density = %d\n",ultra_dist,gas_density);
 	#endif
-    return;
+
+	return;
 }
 
 
@@ -240,16 +294,17 @@ int main(){
 		};
 	#endif		
 
-	#ifdef PROCESS_TIMING
-		startTime=gpioTick();
-	#endif
-
 	//Initialize GPIO
 		intializeGPIO();
 
 	int k=0;
 	pos=0; //Start at 0
 	
+
+	#ifdef PROCESS_TIMING
+		startTime=gpioTick();
+	#endif
+
 	//Continuously get distance measurement and sweep Lidar
 	while(EXIT_COND){
 		//#ifdef ADD_MAG_OFFSET: add UAV orientation (pos) offset as detected by the magnetometer
@@ -266,7 +321,7 @@ int main(){
 				lidar_dist = LIDAR1.getDistance();
 				dist=lidar_dist;					//Use LIDAR range by default
 				#ifdef DEBUG
-					//printf("LIDAR distance: %d\n",lidar_dist);
+					printf("LIDAR distance: %d\n",lidar_dist);
 				#endif
 			}else{
 				quit(LIDAR_ERROR);
@@ -277,14 +332,14 @@ int main(){
 		#ifdef W_ULTRA_AND_GAS
 			getUltraNGasData();	//Get measurements from gas and ultrasonic by calling Python script
 		#endif
-		
+
 		#ifdef W_ULTRA_AND_GAS
 			if(dist==0){			//i.e. if no LIDAR... use ultrasonic range
 				dist=ultra_dist;
 			}
 			//Sensor fusion if BOTH present
 			#ifdef W_LIDAR
-				dist=fuseData(lidar_dist,ultra_dist,gas_density,pos);
+				//dist=fuseData(lidar_dist,ultra_dist,gas_density,pos);
 			#endif
 		#endif
 		
@@ -312,7 +367,7 @@ int main(){
 					#ifdef RAW_GAS_DENSITY
 						serialPrintf(SERIAL_ID,gas_density+"\n");		//Option raw value (not default)
 					#else
-						if(gas_density <= GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-1\n");	//Provide binary value indicator of smoke
+						if(gas_density <= GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-1\n");	//Provide binary value indicator of smoke (-1: no smoke, -2: smoke)
 						else if(gas_density > GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-2\n");
 					#endif
 				#else
@@ -331,11 +386,6 @@ int main(){
 		else pos++;
 		k++;
 	}
-	#ifdef PROCESS_TIMING
-		endTime=gpioTick();
-		processTime=endTime-startTime;
-		printf("Process time, with Lidar: %zu (us)\n\n",processTime);
-	#endif
 
 	gpioTerminate();
 	quit(OTHER_ERROR);

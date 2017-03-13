@@ -76,6 +76,7 @@ def readadc(adc_ch, clockpin, mosipin, misopin, cspin):
 #MAIN FUNCTION: to get ultrasonic and gas sensor data
 
 def main():
+
     reps=10
     #Set up ports
     GPIO.setup(SPIMOSI, GPIO.OUT)       # set up the SPI interface pins
@@ -84,30 +85,31 @@ def main():
     GPIO.setup(SPICS, GPIO.OUT)
 
     try:
-        for adc_channel in adc_ch:      #adc_ch is the channel number
-            adctot = 0
-            # read the analog value
-            for i in range(reps):       #Read same ADC repeatedly for # REPS
-                read_adc = readadc(adc_channel, SPICLK, SPIMOSI, SPIMISO, SPICS)
-                adctot += read_adc
-                time.sleep(0.01)            #Minimum 11.5us limit for acquisition & conversion
-            read_adc = adctot / reps / 1.0 # Take average value
-            # print read_adc
+            for adc_channel in adc_ch:      #adc_ch is the channel number
+                adctot = 0
+                # read the analog value
+                for i in range(reps):       #Read same ADC repeatedly for # REPS
+                    read_adc = readadc(adc_channel, SPICLK, SPIMOSI, SPIMISO, SPICS)
+                    adctot += read_adc
+                    #time.sleep(0.01)            #Minimum 11.5us limit for acquisition & conversion
+                read_adc = adctot / reps / 1.0 # Take average value
+                # print read_adc
+    
+                # convert analog reading to Volts = ADC * ( V_REF / 1024 )
+                volts = read_adc * ( V_REF / 1024.0)
+                # convert voltage to measurement
+                if (adc_channel==ULTRA_ADC_CH): 
+                    ultra_dist = volts * ultra_conv_factor
+                    if ultra_dist < 50:         # Filtering to reduce effect of noise below 50cm
+                        reps = 100
+                    else:
+                        reps = 10
+                    print "\nUltrasonic distance: %d" %ultra_dist
+                elif (adc_channel==GAS_ADC_CH): 
+                    gas_val_percent = volts / V_REF *100
+                    print "Gas density: %d\n" %gas_val_percent
 
-            # convert analog reading to Volts = ADC * ( V_REF / 1024 )
-            volts = read_adc * ( V_REF / 1024.0)
-            # convert voltage to measurement
-            if (adc_channel==ULTRA_ADC_CH): 
-                ultra_dist = volts * ultra_conv_factor
-                if ultra_dist < 50:         # Filtering to reduce effect of noise below 50cm
-                    reps = 100
-                else:
-                    reps = 10
-                #print "Ultrasonic distance: %d" %ultra_dist
-            elif (adc_channel==GAS_ADC_CH): 
-                gas_val_percent = volts / V_REF *100
-                #print "Gas density: %d" %gas_val_percent
-        time.sleep(time_between_readings)
+            #time.sleep(time_between_readings)
         
     except KeyboardInterrupt:             # trap a CTRL+C keyboard interrupt
         GPIO.cleanup()
