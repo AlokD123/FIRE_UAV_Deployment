@@ -13,9 +13,9 @@
 //#include "/usr/include/linux/i2c.h"
 
 /*Python script*/
-//#define PYTHON_SCRIPT_NAME	"GetData_Ultra+Gas"	//NOT A DEFINITION. This must be changed manually.
+//#define PYTHON_SCRIPT_NAME	"GetData_UltraNGas"	//NOT A DEFINITION. This must be changed manually.
 //#define PYTHON_SCRIPT_PATH	'/home/pi/Desktop'	//NOT A DEFINITION. This must be changed manually.
-#define Py_DEBUG
+//#define Py_DEBUG
 
 /*Servo Constants*/
 //#define DEAD_TIME_SWEEP_PROD	500*180					//As sweep angle decreases, dead time should increase??
@@ -59,6 +59,9 @@
 #define EXIT_COND	EXIT_COND1
 #define PROCESS_TIMING
 #define STDOUT_SEPARATOR
+#define SERPRINT1	serialPrintf(SERIAL_ID,
+#define SERPRINT2	printf(
+#define SERPRINT	SERPRINT2
 
 
 /*Functionalities*/
@@ -67,8 +70,8 @@
 #define ADD_MAG_OFFSET						//Add offset in UAV orientation, as measured by the magnetometer  //****TO DECIDE!!
 #define TOGGLE_LED							//Toggle LED ON when object too close, and OFF when not
 
-//#define W_LIDAR								//If LIDAR connected...
-#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
+#define W_LIDAR								//If LIDAR connected...
+//#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
 #define DATA_SEPARATION 					//General separator to allow for parsing <---- Gas sensor data goes here
 #ifdef DATA_SEPARATION
 	//By default, send binary value for whether gas (smoke) is detected (-2) or not (-1).
@@ -112,7 +115,7 @@ void quit(int error){
 
 //Initialization of comm channels
 void initializeSerial(){
-	if( (SERIAL_ID=serialOpen("/dev/ttyAMA0",115200))<0 ){
+	if( (SERIAL_ID=serialOpen("/dev/ttyAMA0",9600))<0 ){
 		#ifdef DEBUG
 			printf("Unable to open serial port. %s", strerror(errno));
 		#endif
@@ -163,14 +166,6 @@ void getUltraNGasData(){
 		printf("Running Python script to get ultrasonic and gas sensor measurements.\n");
 	#endif
 
-	printf("Before initialize\n");
-	// Initialize the Python interpreter.
-	Py_Initialize();
-	if(PYTHON_STARTED==0){
-		PYTHON_STARTED=1;
-	}
-	printf("After initialize\n");
-
 	// Create some Python objects that will later be assigned values.
 	PyObject *pName, *pModule, *pDict, *pFunc;
 	// Set Python path
@@ -180,7 +175,7 @@ void getUltraNGasData(){
 	printf("After add path\n");
 
 	// Convert the file name to a Python string.
-	pName = PyString_FromString("GetData_Ultra+Gas");
+	pName = PyString_FromString("GetData_UltraNGas");
 	if(pName == NULL){
 		#ifdef DEBUG
 			printf("Mispelled script name?\n");
@@ -193,9 +188,9 @@ void getUltraNGasData(){
 	pModule = PyImport_Import(pName);
 	printf("After import module\n");
 	if(pModule == NULL){
-		//#ifdef DEBUG
+		#ifdef DEBUG
 			printf("No Python Script!\n");
-		//#endif
+		#endif
 		quit(NO_PYTHON_SCRIPT);
 	}
 
@@ -221,7 +216,10 @@ void getUltraNGasData(){
 	// Call the function with the arguments.
 	PyObject* pResult = PyObject_CallObject(pFunc, NULL);
 	// Print a message if calling the method failed.
-	if(pResult == NULL)   printf("Method failed.\n");
+	if(pResult == NULL){
+		printf("Method failed.\n");
+		quit(PYTHON_SCRIPT_ERR);
+	}
 	printf("After call script\n");	
 
 
@@ -235,18 +233,18 @@ void getUltraNGasData(){
 	//Parse values
 	PyObject* tupleItem1 = PyTuple_GetItem(pResult,0);
 	if(tupleItem1 == NULL){
-		//#ifdef DEBUG
+		#ifdef DEBUG
 			printf("No ultrasonic distance return value from Python script.\n");
-		//#endif
+		#endif
 		quit(PYTHON_SCRIPT_ERR);
 	}else{
 		ultra_dist=(int) PyInt_AsLong(tupleItem1);
 	}
 	PyObject* tupleItem2 = PyTuple_GetItem(pResult,1);
 	if(tupleItem2 == NULL){
-		//#ifdef DEBUG
+		#ifdef DEBUG
 			printf("No gas sensor measurement return value from Python script.\n");
-		//#endif
+		#endif
 		quit(PYTHON_SCRIPT_ERR);
 	}else{
 		gas_density=(int) PyInt_AsLong(tupleItem2);
@@ -263,9 +261,6 @@ void getUltraNGasData(){
 	Py_CLEAR(tupleItem1);
 	Py_CLEAR(tupleItem2);
 
-	printf("Before finalize\n");
-	Py_Finalize();
-	printf("After finalize\n");
 
 	#ifdef DEBUG
 		printf("Ultra_dist = %d, Gas_density = %d\n",ultra_dist,gas_density);
@@ -304,6 +299,12 @@ int main(){
 	#ifdef PROCESS_TIMING
 		startTime=gpioTick();
 	#endif
+
+	printf("Before initialize\n");
+	// Initialize the Python interpreter.
+	Py_Initialize();
+	printf("After initialize\n");
+
 
 	//Continuously get distance measurement and sweep Lidar
 	while(EXIT_COND){
@@ -349,7 +350,7 @@ int main(){
 				printf("Range: %d cm	Motor Duty Cycle: %d\n", dist,gpioGetPWMdutycycle(SERVO_PIN));
 			#endif
 		#endif
-		serialPrintf(SERIAL_ID,dist+"\n");
+		SERPRINT"%d\n",dist);
 
 		//Delay to allow motor to finish turning (us)
 		gpioDelay(DEAD_TIME*10);
@@ -361,17 +362,17 @@ int main(){
 		if((pos==MIN_POS) || (pos==MAX_POS)){
 			#ifdef DATA_SEPARATION
 				#ifdef STDOUT_SEPARATOR
-					printf("-1\n");	
+					printf("-3\n");	
 				#endif
 				#ifdef W_ULTRA_AND_GAS
 					#ifdef RAW_GAS_DENSITY
-						serialPrintf(SERIAL_ID,gas_density+"\n");		//Option raw value (not default)
+						SERPRINT"%d\n",gas_density);		//Option raw value (not default)
 					#else
-						if(gas_density <= GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-1\n");	//Provide binary value indicator of smoke (-1: no smoke, -2: smoke)
-						else if(gas_density > GAS_THRESHOLD_PRCNT) serialPrintf(SERIAL_ID,"-2\n");
+						if(gas_density <= GAS_THRESHOLD_PRCNT) SERPRINT"-1\n");	//Provide binary value indicator of smoke (-1: no smoke, -2: smoke)
+						else if(gas_density > GAS_THRESHOLD_PRCNT) SERPRINT"-2\n");
 					#endif
 				#else
-					serialPrintf(SERIAL_ID,"-3\n");					// Send data separator -3 (end position)
+					SERPRINT"-3\n");					// Send data separator -3 (end position)
 				#endif
 			#endif
 		}
@@ -386,6 +387,10 @@ int main(){
 		else pos++;
 		k++;
 	}
+
+	printf("Before finalize\n");
+	Py_Finalize();
+	printf("After finalize\n");
 
 	gpioTerminate();
 	quit(OTHER_ERROR);
