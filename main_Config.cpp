@@ -13,20 +13,22 @@
 //#include "/usr/include/linux/i2c.h"
 
 /*Python script*/
-//#define PYTHON_SCRIPT_NAME	"GetData_UltraNGas"	//NOT A DEFINITION. This must be changed manually.
-//#define PYTHON_SCRIPT_PATH	'/home/pi/Desktop'	//NOT A DEFINITION. This must be changed manually.
-//#define Py_DEBUG
+#ifdef W_ULTRA_AND_GAS
+	#define PYTHON_SCRIPT_NAME	"GetData_UltraNGas"	//NOT A DEFINITION. This must be changed manually.
+	#define PYTHON_SCRIPT_PATH	'/home/pi/Desktop'	//NOT A DEFINITION. This must be changed manually.
+	#define Py_DEBUG
+#endif
 
 /*Servo Constants*/
-//#define DEAD_TIME_SWEEP_PROD	500*180					//As sweep angle decreases, dead time should increase??
-#define DEAD_TIME				500					 	//Minimum servo refresh time (in us).
+//#define DEAD_TIME_SWEEP_PROD			500*180				//As sweep angle decreases, dead time should increase??
+#define DEAD_TIME				500				//Minimum servo refresh time (in us).
 #define FREQUENCY				50 //=1/20000us 		//Frequency of PWM for servo (NOT same as width at 180deg position)
 #define MIN_POS_WIDTH			1000 					//Minimum pulse width (us)
 #define MAX_POS_WIDTH			2000 					//Maximum pulse width (us)
 #define WIDTH_CHANGE_RATE		(MAX_POS_WIDTH-MIN_POS_WIDTH)/(180-0)	//Rate of change of marking width of PWM with position (angle)
 
 #define MIN_POS			0					//Minimum position of orientation
-#define MAX_POS			10					//Maximum position of orientation
+#define MAX_POS			40					//Maximum position of orientation
 
 /*Other Sensor Constants*/
 #define GAS_THRESHOLD_PRCNT		20			//% value above which gas (smoke) defined to be detected
@@ -34,10 +36,10 @@
 
 /*Macros*/
 //Convert servo position to scaled duty cycle
-#define PWM_MARK_WIDTH(POS)		(MIN_POS_WIDTH + WIDTH_CHANGE_RATE*POS)	//Get pulse width (us) for a position
-#define PWM_MARK_WIDTH_SEC(POS)	PWM_MARK_WIDTH(POS) //*1/1000000	//Pulse width (sec)
-#define DUTY_CYCLE(POS)			PWM_MARK_WIDTH_SEC(POS)*FREQUENCY	//Convert to duty cycle (decimal)
-#define SCALED_DUTY_CYCLE(POS)	DUTY_CYCLE(POS) //*1000000		//Scale duty cycle by 1000000(1M) (as required)
+#define PWM_MARK_WIDTH(POS)			(MIN_POS_WIDTH + WIDTH_CHANGE_RATE*POS)	//Get pulse width (us) for a position
+#define PWM_MARK_WIDTH_SEC(POS)			PWM_MARK_WIDTH(POS) //*1/1000000	//Pulse width (sec)
+#define DUTY_CYCLE(POS)				PWM_MARK_WIDTH_SEC(POS)*FREQUENCY	//Convert to duty cycle (decimal)
+#define SCALED_DUTY_CYCLE(POS)			DUTY_CYCLE(POS) //*1000000		//Scale duty cycle by 1000000(1M) (as required)
 
 /*Pin definitions*/
 #define SERVO_PIN	18
@@ -46,10 +48,10 @@
 /*Errors*/
 #define GPIO_NO_INITIALIZE	-1
 #define LIDAR_NO_INITIALIZE	-2
-#define LIDAR_ERROR			-3
+#define LIDAR_ERROR		-3
 #define NO_PYTHON_SCRIPT	-4
 #define PYTHON_SCRIPT_ERR	-5
-#define OTHER_ERROR			-6 //See errno
+#define OTHER_ERROR		-6 //See errno
 
 /*States*/
 //#define DEBUG
@@ -61,18 +63,18 @@
 #define STDOUT_SEPARATOR
 #define SERPRINT1	serialPrintf(SERIAL_ID,
 #define SERPRINT2	printf(
-#define SERPRINT	SERPRINT2
+#define SERPRINT	SERPRINT1
 
 
 /*Functionalities*/
-#define WEIGHTED_REPLACE_CENTER				//Replace data point in center with weighted sum of ultrasonic and LIDAR (depending on smoke density) when ultra_dist < ULTRA_MAX_DIST && at half-way angle
+#define WEIGHTED_REPLACE_CENTER			//Replace data point in center with weighted sum of ultrasonic and LIDAR (depending on smoke density) when ultra_dist < ULTRA_MAX_DIST && at half-way angle
 #define USE_ULTRA_BEST_GUESS			//When big discrepancy between ultrasonic and LIDAR, use value of ultrasonic sensor to determine whether too close rather than the LIDAR (i.e. when too smokey and all reflecting)
-#define ADD_MAG_OFFSET						//Add offset in UAV orientation, as measured by the magnetometer  //****TO DECIDE!!
-#define TOGGLE_LED							//Toggle LED ON when object too close, and OFF when not
+#define ADD_MAG_OFFSET				//Add offset in UAV orientation, as measured by the magnetometer  //****TO DECIDE!!
+#define TOGGLE_LED				//Toggle LED ON when object too close, and OFF when not
 
-#define W_LIDAR								//If LIDAR connected...
-//#define W_ULTRA_AND_GAS						//If ultrasonic and gas sensors connected...
-#define DATA_SEPARATION 					//General separator to allow for parsing <---- Gas sensor data goes here
+#define W_LIDAR					//If LIDAR connected...
+//#define W_ULTRA_AND_GAS			//If ultrasonic and gas sensors connected...
+#define DATA_SEPARATION 			//General separator to allow for parsing <---- Gas sensor data goes here
 #ifdef DATA_SEPARATION
 	//By default, send binary value for whether gas (smoke) is detected (-2) or not (-1).
 	//#define RAW_GAS_DENSITY				//Otherwise, send raw gas sensor data
@@ -115,7 +117,7 @@ void quit(int error){
 
 //Initialization of comm channels
 void initializeSerial(){
-	if( (SERIAL_ID=serialOpen("/dev/ttyAMA0",9600))<0 ){
+	if( (SERIAL_ID=serialOpen("/dev/ttyAMA0",115200))<=0 ){
 		#ifdef DEBUG
 			printf("Unable to open serial port. %s", strerror(errno));
 		#endif
@@ -277,6 +279,11 @@ int main(){
 		quit(0);
 	#endif	
 
+	//Start wiringPi
+	if(wiringPiSetup()==-1){
+		printf("Error setting up\n");
+		quit(OTHER_ERROR);
+	}
 
 	//Start serial
 		initializeSerial();
@@ -324,6 +331,7 @@ int main(){
 				#ifdef DEBUG
 					printf("LIDAR distance: %d\n",lidar_dist);
 				#endif
+				//usleep(1000000);
 			}else{
 				quit(LIDAR_ERROR);
 			}
@@ -332,13 +340,11 @@ int main(){
 		//Get ultrasonic distance (polling)
 		#ifdef W_ULTRA_AND_GAS
 			getUltraNGasData();	//Get measurements from gas and ultrasonic by calling Python script
-		#endif
 
-		#ifdef W_ULTRA_AND_GAS
 			if(dist==0){			//i.e. if no LIDAR... use ultrasonic range
 				dist=ultra_dist;
 			}
-			//Sensor fusion if BOTH present
+			//***Sensor fusion if BOTH present***
 			#ifdef W_LIDAR
 				//dist=fuseData(lidar_dist,ultra_dist,gas_density,pos);
 			#endif
@@ -377,15 +383,21 @@ int main(){
 			#endif
 		}
 		
-		//Determine if object too close, based on threshold range. Stored in boolean. Will be later used to direct UAV.
-		
-		//#ifdef TOGGLE_LED: toggle LED if too close
-		
+		//TO DO: determine if object too close, based on threshold range. Stored in boolean. Will be later used to direct UAV. Currently done in MatLab parser script.
 		
 		//Update next position
 		if(turnCW==0) pos--;
 		else pos++;
 		k++;
+
+		//Rate of loop
+		#ifdef PROCESS_TIMING
+			endTime=gpioTick();
+			processTime=endTime-startTime;
+			#ifdef DEBUG
+				printf("Loop time: %zu (us)\n\n",processTime);
+			#endif
+		#endif
 	}
 
 	printf("Before finalize\n");
