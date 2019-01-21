@@ -1,4 +1,4 @@
-# FIRE_System
+# FIRE System
 First-In Response System: A project to develop a UAV that assists firefighters.
 
 ## Introduction
