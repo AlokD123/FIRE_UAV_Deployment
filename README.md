@@ -7,4 +7,4 @@ In this project, we aimed to develop a system that allows a commercial off-the-s
 
 ## Details
 
-Please refer to the paper for details. It may also be found online: https://ieeexplore.ieee.org/document/8058164 (pp. 9-10).
+Please refer to the paper "Paper_UAVFireAssessmentSystem.pdf" for details. The paper may also be found online: https://ieeexplore.ieee.org/document/8058164 (pp. 9-10).
